@@ -1,5 +1,6 @@
 // auto-tailor-95.js - Automatic CV tailoring for guaranteed 95%+ ATS match
 // Orchestrates the full auto-tailor workflow with dynamic score updates
+// OPTIMIZED: Now uses ReliableExtractor and TailorUniversal for speed
 
 (function(global) {
   'use strict';
@@ -46,7 +47,7 @@
       this.onChipsUpdate(keywords, baseCV, 'initial');
 
       // Short delay to show initial state
-      await this.delay(500);
+      await this.delay(300); // Reduced from 500ms for speed
 
       // Step 3: Auto-tailor CV to inject missing keywords
       this.onProgress(50, 'Tailoring CV for ATS optimization...');
@@ -61,7 +62,8 @@
         global.DynamicScore.animateScore(
           initialMatch.score, 
           finalMatch.score, 
-          (score) => this.onScoreUpdate(score, 'animating')
+          (score) => this.onScoreUpdate(score, 'animating'),
+          800 // Faster animation
         );
       } else {
         this.onScoreUpdate(finalMatch.score, 'final');
@@ -81,10 +83,10 @@
         finalScore: finalMatch.score,
         matchedKeywords: finalMatch.matched,
         missingKeywords: finalMatch.missing,
-        injectedKeywords: tailorResult.injectedKeywords,
+        injectedKeywords: tailorResult.injectedKeywords || [],
         stats: {
           keywordsExtracted: keywords.all.length,
-          keywordsInjected: tailorResult.injectedKeywords.length,
+          keywordsInjected: tailorResult.injectedKeywords?.length || 0,
           scoreImprovement: finalMatch.score - initialMatch.score
         }
       };
@@ -92,14 +94,19 @@
 
     /**
      * Extract keywords from job description (up to 35, dynamic)
+     * OPTIMIZED: Uses ReliableExtractor with caching and universal JD parsing
      */
     async extractJobKeywords(jobText) {
-      // Use KeywordExtractor if available
+      // Use ReliableExtractor (new optimized module) if available
+      if (global.ReliableExtractor) {
+        return global.ReliableExtractor.extractReliableKeywords(jobText, this.maxKeywords);
+      }
+      
+      // Fallback to KeywordExtractor for backward compatibility
       if (global.KeywordExtractor) {
         const extracted = global.KeywordExtractor.extractKeywords(jobText, this.maxKeywords);
         
         // Ensure we have proper categorization
-        // Screenshot shows: High Priority (11), Medium Priority (8), Low Priority (4)
         const highCount = Math.min(11, Math.ceil(extracted.all.length * 0.45));
         const mediumCount = Math.min(8, Math.ceil(extracted.all.length * 0.35));
         
@@ -112,12 +119,12 @@
         };
       }
 
-      // Fallback: simple keyword extraction
+      // Ultimate fallback: simple keyword extraction
       return this.simpleKeywordExtraction(jobText);
     }
 
     /**
-     * Simple fallback keyword extraction
+     * Simple fallback keyword extraction (only if no modules available)
      */
     simpleKeywordExtraction(text) {
       const stopWords = new Set([
@@ -132,14 +139,14 @@
         .split(/\s+/)
         .filter(word => word.length >= 3 && !stopWords.has(word));
 
-      // Count frequency
-      const freq = {};
+      // Count frequency (single-pass)
+      const freq = new Map();
       words.forEach(word => {
-        freq[word] = (freq[word] || 0) + 1;
+        freq.set(word, (freq.get(word) || 0) + 1);
       });
 
       // Sort by frequency
-      const sorted = Object.entries(freq)
+      const sorted = [...freq.entries()]
         .sort((a, b) => b[1] - a[1])
         .map(([word]) => word)
         .slice(0, this.maxKeywords);
@@ -158,8 +165,15 @@
 
     /**
      * Calculate initial match score
+     * OPTIMIZED: Uses ReliableExtractor.matchKeywords with caching
      */
     calculateInitialMatch(cvText, keywords) {
+      // Use ReliableExtractor if available
+      if (global.ReliableExtractor) {
+        return global.ReliableExtractor.matchKeywords(cvText, keywords.all);
+      }
+      
+      // Use DynamicScore if available
       if (global.DynamicScore) {
         return global.DynamicScore.calculateDynamicMatch(cvText, keywords.all);
       }
@@ -180,19 +194,26 @@
 
     /**
      * Tailor CV to achieve target score
+     * OPTIMIZED: Uses TailorUniversal with async, non-blocking processing
      */
     async tailorCVForTarget(cvText, keywords, initialMatch) {
-      // Use CVTailor if available
+      // Use TailorUniversal (new optimized module) if available
+      if (global.TailorUniversal) {
+        return global.TailorUniversal.tailorCV(cvText, keywords, { targetScore: this.targetScore });
+      }
+      
+      // Fallback to CVTailor for backward compatibility
       if (global.CVTailor) {
-        return global.CVTailor.tailorCV(cvText, keywords, { targetScore: this.targetScore });
+        const result = await Promise.resolve(global.CVTailor.tailorCV(cvText, keywords, { targetScore: this.targetScore }));
+        return result;
       }
 
-      // Fallback: simple keyword injection
+      // Ultimate fallback: simple keyword injection
       return this.simpleKeywordInjection(cvText, keywords, initialMatch);
     }
 
     /**
-     * Simple fallback keyword injection
+     * Simple fallback keyword injection (only if no modules available)
      */
     simpleKeywordInjection(cvText, keywords, initialMatch) {
       let tailoredCV = cvText;
@@ -234,70 +255,72 @@
       const summaryMatch = summaryPattern.exec(tailoredCV);
       
       if (summaryMatch && missingKeywords.length > injected.length) {
-        const remaining = missingKeywords.filter(k => !injected.includes(k));
-        if (remaining.length >= 3) {
-          const toInject = remaining.slice(0, 4);
-          const insertPos = tailoredCV.indexOf('\n\n', summaryMatch.index);
-          if (insertPos > 0) {
-            const sentence = `Proficient in ${toInject.slice(0, -1).join(', ')} and ${toInject[toInject.length - 1]}.`;
-            tailoredCV = tailoredCV.slice(0, insertPos) + ' ' + sentence + tailoredCV.slice(insertPos);
-            injected.push(...toInject);
+        const remainingKeywords = missingKeywords.filter(kw => !injected.includes(kw));
+        if (remainingKeywords.length > 0) {
+          const summaryEndPos = tailoredCV.indexOf('\n\n', summaryMatch.index);
+          if (summaryEndPos > summaryMatch.index) {
+            const keywordsToAdd = remainingKeywords.slice(0, 5);
+            const addition = ` Expertise includes ${keywordsToAdd.join(', ')}.`;
+            tailoredCV = tailoredCV.slice(0, summaryEndPos) + addition + tailoredCV.slice(summaryEndPos);
+            injected.push(...keywordsToAdd);
           }
         }
       }
 
-      // Calculate final score
-      const finalMatch = this.calculateInitialMatch(tailoredCV, keywords);
+      // Calculate final match
+      const finalMatch = this.calculateFinalMatch(tailoredCV, keywords);
 
       return {
         tailoredCV,
         injectedKeywords: injected,
         matchScore: finalMatch.score,
         matchedKeywords: finalMatch.matched,
-        missingKeywords: finalMatch.missing,
-        stats: {
-          summary: 0,
-          experience: 0,
-          skills: injected.length,
-          total: injected.length
-        }
+        missingKeywords: finalMatch.missing
       };
     }
 
     /**
-     * Calculate final match score
+     * Calculate final match score after tailoring
      */
     calculateFinalMatch(cvText, keywords) {
+      // Use ValidationEngine if available
+      if (global.ValidationEngine) {
+        return global.ValidationEngine.validateTailoring(cvText, keywords.all);
+      }
+      
+      // Use ReliableExtractor if available
+      if (global.ReliableExtractor) {
+        return global.ReliableExtractor.matchKeywords(cvText, keywords.all);
+      }
+      
+      // Use DynamicScore if available
       if (global.DynamicScore) {
         return global.DynamicScore.calculateDynamicMatch(cvText, keywords.all);
       }
       
-      return this.calculateInitialMatch(cvText, keywords);
+      // Fallback
+      const cvLower = cvText.toLowerCase();
+      const matched = keywords.all.filter(kw => cvLower.includes(kw.toLowerCase()));
+      const missing = keywords.all.filter(kw => !cvLower.includes(kw.toLowerCase()));
+      
+      return {
+        score: Math.round((matched.length / keywords.all.length) * 100),
+        matched,
+        missing,
+        matchCount: matched.length,
+        totalKeywords: keywords.all.length
+      };
     }
 
     /**
-     * Delay helper
+     * Utility delay function
      */
     delay(ms) {
       return new Promise(resolve => setTimeout(resolve, ms));
     }
   }
 
-  /**
-   * Quick helper to run auto-tailor workflow
-   */
-  async function runAutoTailor(jobDescription, baseCV, callbacks = {}) {
-    const tailor = new AutoTailor95({
-      onProgress: callbacks.onProgress || (() => {}),
-      onScoreUpdate: callbacks.onScoreUpdate || (() => {}),
-      onChipsUpdate: callbacks.onChipsUpdate || (() => {})
-    });
-
-    return tailor.autoTailorTo95Plus(jobDescription, baseCV);
-  }
-
   // Export
   global.AutoTailor95 = AutoTailor95;
-  global.runAutoTailor = runAutoTailor;
 
 })(typeof window !== 'undefined' ? window : global);
