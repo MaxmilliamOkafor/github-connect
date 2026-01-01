@@ -237,6 +237,44 @@ body {
   text-align: center;
 }
 
+/* Pipeline Steps */
+.pipeline-steps {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pipeline-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: rgba(255,255,255,0.5);
+  padding: 6px 10px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+  transition: all 0.3s;
+}
+
+.pipeline-step.active {
+  color: #ffa502;
+  background: rgba(255,165,2,0.1);
+}
+
+.pipeline-step.complete {
+  color: #2ed573;
+  background: rgba(46,213,115,0.1);
+}
+
+.pipeline-step .step-icon {
+  font-size: 12px;
+}
+
+.pipeline-step.complete .step-icon {
+  color: #2ed573;
+}
+
 /* Documents */
 .documents-card {
   background: rgba(255,255,255,0.05);
