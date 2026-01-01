@@ -710,6 +710,13 @@ class ATSTailor {
     }
   }
 
+  /**
+   * Full automatic tailoring pipeline:
+   * 1. Extract keywords from JD
+   * 2. Boost CV to 95-100% match
+   * 3. Generate ATS-tailored CV & Cover Letter
+   * 4. Replace any LazyApply CV with the new one
+   */
   async tailorDocuments() {
     if (!this.currentJob) {
       this.showToast('No job detected', 'error');
@@ -721,10 +728,12 @@ class ATSTailor {
     const progressContainer = document.getElementById('progressContainer');
     const progressFill = document.getElementById('progressFill');
     const progressText = document.getElementById('progressText');
+    const pipelineSteps = document.getElementById('pipelineSteps');
     
     btn.disabled = true;
     btn.querySelector('.btn-text').textContent = 'Tailoring...';
     progressContainer?.classList.remove('hidden');
+    pipelineSteps?.classList.remove('hidden');
     this.setStatus('Tailoring...', 'working');
 
     const updateProgress = (percent, text) => {
@@ -732,13 +741,47 @@ class ATSTailor {
       if (progressText) progressText.textContent = text;
     };
 
+    const updateStep = (stepNum, status) => {
+      const step = document.getElementById(`step${stepNum}`);
+      if (!step) return;
+      const icon = step.querySelector('.step-icon');
+      if (status === 'working') {
+        icon.textContent = '⏳';
+        step.classList.add('active');
+        step.classList.remove('complete');
+      } else if (status === 'complete') {
+        icon.textContent = '✓';
+        step.classList.remove('active');
+        step.classList.add('complete');
+      }
+    };
+
     try {
-      updateProgress(20, 'Loading your profile...');
+      // ============ STEP 1: Extract Keywords ============
+      updateStep(1, 'working');
+      updateProgress(10, 'Step 1/3: Extracting keywords from job description...');
 
       await this.refreshSessionIfNeeded();
       if (!this.session?.access_token || !this.session?.user?.id) {
         throw new Error('Please sign in again');
       }
+
+      // Extract keywords from job description
+      let keywords = { all: [], highPriority: [], mediumPriority: [], lowPriority: [] };
+      if (this.currentJob?.description) {
+        if (window.ReliableExtractor) {
+          keywords = window.ReliableExtractor.extractReliableKeywords(this.currentJob.description, 35);
+        } else if (window.KeywordExtractor) {
+          keywords = window.KeywordExtractor.extractKeywords(this.currentJob.description, 35);
+        }
+      }
+
+      console.log('[ATS Tailor] Step 1 - Extracted keywords:', keywords.all?.length || 0);
+      updateStep(1, 'complete');
+
+      // ============ STEP 2: Load Profile & Generate Base CV ============
+      updateStep(2, 'working');
+      updateProgress(25, 'Step 2/3: Loading profile and generating base CV...');
 
       const profileRes = await fetch(
         `${SUPABASE_URL}/rest/v1/profiles?user_id=eq.${this.session.user.id}&select=first_name,last_name,email,phone,linkedin,github,portfolio,cover_letter,work_experience,education,skills,certifications,achievements,ats_strategy,city,country,address,state,zip_code`,
@@ -757,7 +800,7 @@ class ATSTailor {
       const profileRows = await profileRes.json();
       const p = profileRows?.[0] || {};
 
-      updateProgress(35, 'Generating tailored documents...');
+      updateProgress(40, 'Step 2/3: Generating tailored documents...');
 
       const response = await fetch(`${SUPABASE_URL}/functions/v1/tailor-application`, {
         method: 'POST',
@@ -796,8 +839,6 @@ class ATSTailor {
         }),
       });
 
-      updateProgress(70, 'Processing results...');
-
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(errorText || 'Server error');
@@ -806,7 +847,6 @@ class ATSTailor {
       const result = await response.json();
       if (result.error) throw new Error(result.error);
 
-      // Generate fallback filename with FirstName_LastName format
       const fallbackName = `${(p.first_name || '').trim()}_${(p.last_name || '').trim()}`.replace(/\s+/g, '_') || 'Applicant';
 
       this.generatedDocuments = {
@@ -818,44 +858,93 @@ class ATSTailor {
         coverFileName: result.coverLetterFileName || result.coverLetterPdfFileName || `${fallbackName}_Cover_Letter.pdf`,
         matchScore: result.matchScore || 0,
         matchedKeywords: result.keywordsMatched || result.matchedKeywords || [],
-        missingKeywords: result.keywordsMissing || result.missingKeywords || []
+        missingKeywords: result.keywordsMissing || result.missingKeywords || [],
+        keywords: keywords
       };
 
-      // --- Ensure keywords are extracted + displayed (for the Match Analysis panel)
-      // Backend might not return keyword lists for some jobs; derive them from the detected job description.
-      try {
-        if (window.KeywordExtractor && this.currentJob?.description) {
-          const keywords = window.KeywordExtractor.extractKeywords(this.currentJob.description, 35);
-          const match = window.KeywordExtractor.matchKeywords(this.generatedDocuments.cv || '', keywords.all || []);
-          this.generatedDocuments.keywords = keywords;
+      // Calculate initial match score
+      if (keywords.all?.length > 0 && this.generatedDocuments.cv) {
+        const extractor = window.ReliableExtractor || window.KeywordExtractor;
+        if (extractor) {
+          const match = extractor.matchKeywords(this.generatedDocuments.cv, keywords.all);
           this.generatedDocuments.matchedKeywords = match.matched;
           this.generatedDocuments.missingKeywords = match.missing;
-          // If backend score is missing/0, compute a local score.
-          if (!this.generatedDocuments.matchScore || this.generatedDocuments.matchScore <= 0) {
-            this.generatedDocuments.matchScore = match.matchScore;
-          }
+          this.generatedDocuments.matchScore = match.matchScore;
         }
-      } catch (e) {
-        console.warn('[ATS Tailor] keyword extraction failed', e);
       }
 
-      // --- Dynamic location tailoring in the CV header + PDF
-      // If the tailored CV header still contains profile location (e.g. Dublin), replace it with the job location.
+      console.log('[ATS Tailor] Step 2 - Initial match score:', this.generatedDocuments.matchScore + '%');
+      updateStep(2, 'complete');
+
+      // ============ STEP 3: Boost CV to 95%+ ============
+      updateStep(3, 'working');
+      updateProgress(60, 'Step 3/3: Boosting CV to 95-100% keyword match...');
+
+      const currentScore = this.generatedDocuments.matchScore || 0;
+      
+      // Only boost if score is below target
+      if (currentScore < 95 && keywords.all?.length > 0) {
+        try {
+          let tailorResult;
+
+          if (window.TailorUniversal) {
+            tailorResult = await window.TailorUniversal.tailorCV(
+              this.generatedDocuments.cv,
+              keywords.all,
+              { targetScore: 95 }
+            );
+          } else if (window.AutoTailor95) {
+            const tailor = new window.AutoTailor95({
+              onProgress: (percent, text) => {
+                updateProgress(60 + (percent * 0.2), `Step 3/3: ${text}`);
+              },
+              onScoreUpdate: (score) => {
+                if (window.KeywordChips) {
+                  window.KeywordChips.updateMatchGauge(score, 0, 0);
+                }
+              }
+            });
+
+            tailorResult = await tailor.autoTailorTo95Plus(
+              this.currentJob.description,
+              this.generatedDocuments.cv
+            );
+          } else if (window.CVTailor) {
+            tailorResult = window.CVTailor.tailorCV(
+              this.generatedDocuments.cv,
+              keywords,
+              { targetScore: 95 }
+            );
+          }
+
+          if (tailorResult?.tailoredCV) {
+            this.generatedDocuments.cv = tailorResult.tailoredCV;
+            this.generatedDocuments.matchScore = tailorResult.finalScore || tailorResult.matchScore || currentScore;
+            this.generatedDocuments.matchedKeywords = tailorResult.matchedKeywords || this.generatedDocuments.matchedKeywords;
+            this.generatedDocuments.missingKeywords = tailorResult.missingKeywords || this.generatedDocuments.missingKeywords;
+            
+            console.log('[ATS Tailor] Step 3 - Boosted score:', this.generatedDocuments.matchScore + '%');
+          }
+        } catch (e) {
+          console.warn('[ATS Tailor] Boost step failed, continuing with base CV:', e);
+        }
+      }
+
+      updateProgress(80, 'Step 3/3: Applying location and regenerating PDF...');
+
+      // Dynamic location tailoring
       try {
         const tailoredLocation = window.LocationTailor
           ? window.LocationTailor.extractFromJobData(this.currentJob)
           : (this.currentJob?.location || 'Open to relocation');
 
-        // Patch header line "phone | email | LOCATION | open to relocation" to enforce LOCATION.
         const patchHeaderLocation = (cvText, newLoc) => {
           if (!cvText || !newLoc) return cvText;
           const lines = cvText.split('\n');
-          // Find first line containing both email and pipes (header line)
           const idx = lines.findIndex((l) => l.includes('|') && /@/.test(l) && /open to relocation/i.test(l));
           if (idx === -1) return cvText;
 
           const parts = lines[idx].split('|').map((p) => p.trim());
-          // Expected: [phone, email, location, open to relocation]
           if (parts.length >= 4) {
             parts[2] = newLoc;
             lines[idx] = parts.join(' | ');
@@ -868,8 +957,7 @@ class ATSTailor {
         this.generatedDocuments.cv = patchedCV;
         this.currentJob.location = tailoredLocation;
 
-        // Regenerate CV PDF via backend using the patched CV content and tailoredLocation.
-        // This ensures the recruiter PDF matches the preview header.
+        // Regenerate CV PDF with boosted content
         if (this.session?.access_token && this.generatedDocuments.cv) {
           const pdfRes = await fetch(`${SUPABASE_URL}/functions/v1/generate-pdf`, {
             method: 'POST',
@@ -897,12 +985,13 @@ class ATSTailor {
           }
         }
       } catch (e) {
-        console.warn('[ATS Tailor] dynamic location patch failed', e);
+        console.warn('[ATS Tailor] Dynamic location patch failed', e);
       }
 
-      await chrome.storage.local.set({ ats_lastGeneratedDocuments: this.generatedDocuments });
+      updateStep(3, 'complete');
+      updateProgress(100, 'Complete! ATS-tailored CV & Cover Letter ready.');
 
-      updateProgress(100, 'Complete!');
+      await chrome.storage.local.set({ ats_lastGeneratedDocuments: this.generatedDocuments });
 
       const elapsed = (Date.now() - startTime) / 1000;
       this.stats.today++;
@@ -918,7 +1007,11 @@ class ATSTailor {
       this.updateDocumentDisplay();
       this.updatePreviewContent();
       
-      this.showToast(`Done in ${elapsed.toFixed(1)}s! Match: ${this.generatedDocuments.matchScore}%`, 'success');
+      const finalScore = this.generatedDocuments.matchScore;
+      this.showToast(
+        `Done in ${elapsed.toFixed(1)}s! ${finalScore}% keyword match from job description.`, 
+        'success'
+      );
       this.setStatus('Complete', 'ready');
 
     } catch (error) {
@@ -928,7 +1021,18 @@ class ATSTailor {
     } finally {
       btn.disabled = false;
       btn.querySelector('.btn-text').textContent = 'Tailor CV & Cover Letter';
-      setTimeout(() => progressContainer?.classList.add('hidden'), 2000);
+      setTimeout(() => {
+        progressContainer?.classList.add('hidden');
+        // Reset step icons
+        [1, 2, 3].forEach(n => {
+          const step = document.getElementById(`step${n}`);
+          if (step) {
+            step.classList.remove('active', 'complete');
+            const icon = step.querySelector('.step-icon');
+            if (icon) icon.textContent = '⏳';
+          }
+        });
+      }, 3000);
     }
   }
 
