@@ -293,58 +293,62 @@
         </details>
       </div>
 
-      <!-- Bulk Apply Button -->
-      <div class="bulk-apply-section">
+      <!-- Bulk Apply Dashboard Entry -->
+      <div class="bulk-apply-entry">
         <button id="openBulkApply" class="btn btn-secondary btn-large btn-full">
           <span class="btn-icon-left">📊</span>
           <span class="btn-text">Bulk Apply Dashboard</span>
         </button>
-        <p class="bulk-hint">Upload CSV or paste URLs for sequential applications</p>
       </div>
 
       <!-- Simplify ATS Score Breakdown -->
-      <div class="simplify-score-card hidden" id="simplifyScoreCard">
-        <h3>📊 Simplify ATS Score</h3>
-        <div class="score-breakdown">
-          <div class="score-row">
-            <span>Keyword Coverage</span>
-            <span class="score-value" id="sKeywordCoverage">0/50</span>
-          </div>
-          <div class="score-row">
-            <span>Missing Keywords</span>
-            <span class="score-value negative" id="sMissingKeywords">0/20</span>
-          </div>
-          <div class="score-row">
-            <span>Experience Match</span>
-            <span class="score-value" id="sExperienceMatch">0/20</span>
-          </div>
-          <div class="score-row">
-            <span>Technical Alignment</span>
-            <span class="score-value" id="sTechnicalAlign">0/15</span>
-          </div>
-          <div class="score-row">
-            <span>Location/Format</span>
-            <span class="score-value" id="sLocationFormat">0/15</span>
-          </div>
-          <div class="score-row total">
-            <span>TOTAL</span>
-            <span class="score-value" id="sTotalScore">0/100</span>
-          </div>
+      <div class="simplify-score-section hidden" id="simplifyScoreSection">
+        <div class="simplify-header">
+          <span class="simplify-logo">📊</span>
+          <span class="simplify-title">Simplify ATS Score</span>
         </div>
-        <div class="missing-fixes hidden" id="missingFixes">
-          <h4>🔴 Top 5 Fixes</h4>
-          <ul id="fixesList"></ul>
+        <div class="score-breakdown">
+          <div class="score-item">
+            <span class="score-label">Keyword Coverage</span>
+            <div class="score-bar">
+              <div class="score-fill" id="keywordCoverageBar" style="width: 0%"></div>
+            </div>
+            <span class="score-value" id="keywordCoverageValue">0%</span>
+          </div>
+          <div class="score-item">
+            <span class="score-label">Experience Match</span>
+            <div class="score-bar">
+              <div class="score-fill" id="experienceMatchBar" style="width: 0%"></div>
+            </div>
+            <span class="score-value" id="experienceMatchValue">0%</span>
+          </div>
+          <div class="score-item">
+            <span class="score-label">Technical Alignment</span>
+            <div class="score-bar">
+              <div class="score-fill" id="technicalAlignmentBar" style="width: 0%"></div>
+            </div>
+            <span class="score-value" id="technicalAlignmentValue">0%</span>
+          </div>
         </div>
       </div>
     </section>
 
     <footer class="footer">
-      <span class="version">v2.0.0</span>
+      <span class="version">v2.1.0</span>
     </footer>
   </div>
 
+  <!-- Core dependencies (load first) -->
+  <script src="universal-jd-parser.js"></script>
+  <script src="reliable-extractor.js"></script>
+  <script src="tailor-universal.js"></script>
+  <script src="validation-engine.js"></script>
+  
+  <!-- Legacy modules (backward compatibility) -->
   <script src="keyword-extractor.js"></script>
   <script src="cv-tailor.js"></script>
+  
+  <!-- UI and automation modules -->
   <script src="match-ui.js"></script>
   <script src="dynamic-score.js"></script>
   <script src="auto-tailor-95.js"></script>
@@ -352,6 +356,8 @@
   <script src="button-fixer.js"></script>
   <script src="location-tailor.js"></script>
   <script src="pdf-ats-perfect.js"></script>
+  
+  <!-- Main application (load last) -->
   <script src="popup.js"></script>
 </body>
 </html>
