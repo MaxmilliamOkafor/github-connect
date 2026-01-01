@@ -1,12 +1,22 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import { Calculator } from "@/components/Calculator";
 
 const Index = () => {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="text-center">
-        <h1 className="mb-4 text-4xl font-bold">Welcome to Your Blank App</h1>
-        <p className="text-xl text-muted-foreground">Start building your amazing project here!</p>
-      </div>
+    <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-background">
+      <header className="mb-8 text-center animate-fade-in">
+        <h1 className="text-2xl font-semibold text-foreground tracking-tight">
+          Calculator
+        </h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Simple & elegant
+        </p>
+      </header>
+      
+      <Calculator />
+      
+      <footer className="mt-8 text-xs text-muted-foreground animate-fade-in">
+        Tap the buttons to calculate
+      </footer>
     </div>
   );
 };
